@@ -27,6 +27,7 @@ import { openSettings } from "./settings";
 
 export type State = {
   inFocusMode: boolean;
+  focusModeToggleInProgress: boolean;
   projects: Project[];
   groups: Group[];
   decorations: vscode.TextEditorDecorationType[];
@@ -43,6 +44,7 @@ export function activate(context: vscode.ExtensionContext) {
   const groups: Group[] = [];
   const state: State = {
     inFocusMode: false,
+    focusModeToggleInProgress: false,
     projects,
     groups,
     decorations: [],
@@ -194,11 +196,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   let disposibleAddFilter = vscode.commands.registerCommand(
     "log-analysis.addFilter",
-    (treeItem: vscode.TreeItem) => {
-      if (treeItem === undefined) {
-        vscode.window.showErrorMessage('This command is excuted with button in FILTERS');
-        return;
-      }
+    (treeItem: vscode.TreeItem | undefined) => {
       addFilter(treeItem, state);
     }
   );

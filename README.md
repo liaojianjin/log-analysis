@@ -20,6 +20,7 @@ The focus mode is implemented as a virtual document (read-only), and the origina
 
 This extension creates a tab "FILTERS" in the explorer sidebar. This tab holds all the filters created and allows for filter management.
 ![filter](https://raw.githubusercontent.com/SoySauceFor3/log-analysis/main/image/filter.png)  
+You can click the `Add a Filter` icon at the top of the FILTERS view to add a filter directly.
 Each line in the tab contains one filter. The filled/unfilled circle represents the color of the filter and whether the highlight is applied to documents. The text represents the regex of the filter. And the number in smaller font, if there is one, represents the number of lines that match the regex in the active editor.  
 For each filter, there are four attributes:
 
@@ -42,3 +43,12 @@ The filters can be imported and exported as json files. Related commands are `lo
 In VS Code, when opening files larger than 50MB, the use of extensions is restricted to ensure performance and memory efficiency. This limitation helps maintain a responsive and stable environment when handling large files. More details on this can be found in [#31078](https://github.com/microsoft/vscode/issues/31078). By using the extension below, you can enable extension functionality when opening large files, allowing for log analysis.
 
 It works well with [![Visual Studio Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/mbehr1.vsc-lfs?color=green&label=vsc-lfs&logo=visual-studio-code)](https://marketplace.visualstudio.com/items?itemName=mbehr1.vsc-lfs) to handle large log files.
+
+## Packaging
+
+Use `npm run package` to generate the distributable `.vsix` package.
+
+## Settings
+
+- `log-analysis.useDefaultFilterGroup`: If enabled, adding filter directly will use/create a default group automatically.
+- `log-analysis.defaultFilterGroupName`: Name of that default group.

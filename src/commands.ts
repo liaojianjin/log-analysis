@@ -3,6 +3,7 @@ import { State } from "./extension";
 import { readSettings, saveSettings } from "./settings";
 import {
   Filter,
+  Group,
   generateRandomColor,
   generateSvgUri,
   getProjectSelectedIndex,
@@ -95,27 +96,32 @@ function getOriginalUriFromFocusUri(focusUri: vscode.Uri): vscode.Uri {
 }
 
 function refreshFocusModeState(state: State): void {
-  state.inFocusMode = vscode.workspace.textDocuments.some(
-    (doc) => doc.uri.scheme === "focus"
+  state.inFocusMode = vscode.window.visibleTextEditors.some(
+    (editor) => editor.document.uri.scheme === "focus"
   );
 }
 
-async function closeFocusModeDocument(
-  focusUri: vscode.Uri,
+function findVisibleFocusEditor(
+  focusUri: vscode.Uri
+): vscode.TextEditor | undefined {
+  return vscode.window.visibleTextEditors.find(
+    (editor) => editor.document.uri.toString() === focusUri.toString()
+  );
+}
+
+async function closeVisibleEditor(editor: vscode.TextEditor): Promise<void> {
+  await vscode.window.showTextDocument(editor.document, {
+    viewColumn: editor.viewColumn,
+    preserveFocus: false,
+    preview: false,
+  });
+  await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+}
+
+async function openOriginalDocument(
   originalUri: vscode.Uri,
   viewColumn: vscode.ViewColumn | undefined
 ): Promise<void> {
-  const openedFocusDocument = vscode.workspace.textDocuments.find(
-    (doc) => doc.uri.toString() === focusUri.toString()
-  );
-  if (openedFocusDocument !== undefined) {
-    await vscode.window.showTextDocument(openedFocusDocument, {
-      viewColumn,
-      preserveFocus: false,
-      preview: false,
-    });
-    await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
-  }
   const originalDocument = await vscode.workspace.openTextDocument(originalUri);
   await vscode.window.showTextDocument(originalDocument, {
     viewColumn,
@@ -133,26 +139,33 @@ export async function turnOnFocusMode(state: State) {
   if (!editor) {
     return;
   }
+  if (state.focusModeToggleInProgress) {
+    return;
+  }
 
   const activeUri = editor.document.uri;
   const viewColumn = editor.viewColumn;
   const isFocusDocument = activeUri.scheme === "focus";
 
+  state.focusModeToggleInProgress = true;
   try {
     if (isFocusDocument) {
       const originalUri = getOriginalUriFromFocusUri(activeUri);
-      await closeFocusModeDocument(activeUri, originalUri, viewColumn);
+      await closeVisibleEditor(editor);
+      await openOriginalDocument(originalUri, viewColumn);
       refreshFocusModeState(state);
       return;
     }
 
     const focusUri = getFocusUri(activeUri);
-    const hasOpenedFocusDocument = vscode.workspace.textDocuments.some(
-      (doc) => doc.uri.toString() === focusUri.toString()
-    );
-
-    if (hasOpenedFocusDocument) {
-      await closeFocusModeDocument(focusUri, activeUri, viewColumn);
+    const visibleFocusEditor = findVisibleFocusEditor(focusUri);
+    if (visibleFocusEditor !== undefined) {
+      await closeVisibleEditor(visibleFocusEditor);
+      await vscode.window.showTextDocument(editor.document, {
+        viewColumn,
+        preserveFocus: false,
+        preview: false,
+      });
       refreshFocusModeState(state);
       return;
     }
@@ -168,6 +181,8 @@ export async function turnOnFocusMode(state: State) {
   } catch (error) {
     const message = error instanceof Error ? error.message : `${error}`;
     vscode.window.showErrorMessage(`Failed to toggle focus mode: ${message}`);
+  } finally {
+    state.focusModeToggleInProgress = false;
   }
 }
 
@@ -183,7 +198,51 @@ export function deleteFilter(treeItem: vscode.TreeItem, state: State) {
   refreshEditors(state);
 }
 
-export function addFilter(treeItem: vscode.TreeItem, state: State) {
+function createGroup(name: string): Group {
+  return {
+    filters: [],
+    isHighlighted: true,
+    isShown: true,
+    name,
+    id: `${Math.random()}`,
+  };
+}
+
+function resolveTargetGroup(
+  treeItem: vscode.TreeItem | undefined,
+  state: State
+): Group | undefined {
+  if (treeItem !== undefined) {
+    return state.groups.find((group) => group.id === treeItem.id);
+  }
+
+  const config = vscode.workspace.getConfiguration("log-analysis");
+  const useDefaultFilterGroup = config.get<boolean>("useDefaultFilterGroup", true);
+  if (!useDefaultFilterGroup) {
+    return undefined;
+  }
+
+  const defaultGroupName = config.get<string>("defaultFilterGroupName", "Default");
+  const groupName =
+    defaultGroupName.trim().length > 0 ? defaultGroupName.trim() : "Default";
+  let defaultGroup = state.groups.find((group) => group.name === groupName);
+  if (defaultGroup === undefined) {
+    defaultGroup = createGroup(groupName);
+    state.groups.push(defaultGroup);
+  }
+
+  return defaultGroup;
+}
+
+export function addFilter(treeItem: vscode.TreeItem | undefined, state: State) {
+  const targetGroup = resolveTargetGroup(treeItem, state);
+  if (targetGroup === undefined) {
+    vscode.window.showErrorMessage(
+      "Please create/select a filter group first, or enable 'Log Analysis: Use Default Filter Group'."
+    );
+    return;
+  }
+
   // First show quick pick with choices
   vscode.window
     .showQuickPick(["Add a filter", "Add an exclude filter"], {
@@ -203,7 +262,6 @@ export function addFilter(treeItem: vscode.TreeItem, state: State) {
           if (!regexStr) {
             return;
           }
-          const group = state.groups.find((group) => group.id === treeItem.id);
           const id = `${Math.random()}`;
           const isExclude = selected === "Add an exclude filter";
           const color = generateRandomColor(isExclude);
@@ -217,7 +275,7 @@ export function addFilter(treeItem: vscode.TreeItem, state: State) {
             count: 0,
             isExclude: isExclude,
           };
-          group!.filters.push(filter);
+          targetGroup.filters.push(filter);
           refreshEditors(state);
         });
     });
@@ -331,14 +389,7 @@ export function addGroup(state: State) {
       if (name === undefined) {
         return;
       }
-      const id = `${Math.random()}`;
-      const group = {
-        filters: [],
-        isHighlighted: true,
-        isShown: true,
-        name: name,
-        id,
-      };
+      const group = createGroup(name);
       state.groups.push(group);
       refreshFilterTreeView(state);
     });

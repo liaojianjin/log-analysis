@@ -20,6 +20,21 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "Log Analysis",
+      "properties": {
+        "log-analysis.useDefaultFilterGroup": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow adding filters directly without selecting a group by using a default group."
+        },
+        "log-analysis.defaultFilterGroupName": {
+          "type": "string",
+          "default": "Default",
+          "description": "Name of the auto-created default filter group."
+        }
+      }
+    },
     "commands": [
       {
         "command": "log-analysis.addGroup",
@@ -171,19 +186,24 @@
       ],
       "view/title": [
         {
-          "command": "log-analysis.addGroup",
+          "command": "log-analysis.addFilter",
           "when": "view == filters",
           "group": "navigation@1"
         },
         {
-          "command": "log-analysis.turnOnFocusMode",
+          "command": "log-analysis.addGroup",
           "when": "view == filters",
           "group": "navigation@2"
         },
         {
-          "command": "log-analysis.saveProject",
+          "command": "log-analysis.turnOnFocusMode",
           "when": "view == filters",
           "group": "navigation@3"
+        },
+        {
+          "command": "log-analysis.saveProject",
+          "when": "view == filters",
+          "group": "navigation@4"
         },
         {
           "command": "log-analysis.addProject",
@@ -236,6 +256,7 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
+    "package": "npx @vscode/vsce package",
     "lint": "eslint src --ext ts",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
