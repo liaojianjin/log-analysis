@@ -58,7 +58,7 @@
       },
       {
         "command": "log-analysis.turnOnFocusMode",
-        "title": "Turn on Focus Mode",
+        "title": "Toggle Focus Mode",
         "icon": "$(symbol-keyword)"
       },
       {

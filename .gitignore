@@ -6,3 +6,4 @@ resources/
 .anima/
 .vscode/
 .DS_Store
+.npm-cache/

@@ -86,26 +86,88 @@ export function setVisibility(
   refreshEditors(state);
 }
 
-//turn on focus mode for the active editor. Will create a new tab if not already for the virtual document
-export function turnOnFocusMode(state: State) {
-  let editor = vscode.window.activeTextEditor;
+function getFocusUri(originalUri: vscode.Uri): vscode.Uri {
+  return vscode.Uri.parse("focus:" + originalUri.toString());
+}
+
+function getOriginalUriFromFocusUri(focusUri: vscode.Uri): vscode.Uri {
+  return vscode.Uri.parse(focusUri.path);
+}
+
+function refreshFocusModeState(state: State): void {
+  state.inFocusMode = vscode.workspace.textDocuments.some(
+    (doc) => doc.uri.scheme === "focus"
+  );
+}
+
+async function closeFocusModeDocument(
+  focusUri: vscode.Uri,
+  originalUri: vscode.Uri,
+  viewColumn: vscode.ViewColumn | undefined
+): Promise<void> {
+  const openedFocusDocument = vscode.workspace.textDocuments.find(
+    (doc) => doc.uri.toString() === focusUri.toString()
+  );
+  if (openedFocusDocument !== undefined) {
+    await vscode.window.showTextDocument(openedFocusDocument, {
+      viewColumn,
+      preserveFocus: false,
+      preview: false,
+    });
+    await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+  }
+  const originalDocument = await vscode.workspace.openTextDocument(originalUri);
+  await vscode.window.showTextDocument(originalDocument, {
+    viewColumn,
+    preserveFocus: false,
+    preview: false,
+  });
+}
+
+//toggle focus mode for the active editor:
+//1) original document -> open focus mode virtual document
+//2) focus mode document -> close focus mode and switch back to original document
+//3) original document with opened focus tab -> close the opened focus tab
+export async function turnOnFocusMode(state: State) {
+  const editor = vscode.window.activeTextEditor;
   if (!editor) {
     return;
   }
-  let escapedUri = editor.document.uri.toString();
-  if (escapedUri.startsWith("focus:")) {
-    //avoid creating nested focus mode documents
-    vscode.window.showInformationMessage(
-      "You are on focus mode virtual document already!"
+
+  const activeUri = editor.document.uri;
+  const viewColumn = editor.viewColumn;
+  const isFocusDocument = activeUri.scheme === "focus";
+
+  try {
+    if (isFocusDocument) {
+      const originalUri = getOriginalUriFromFocusUri(activeUri);
+      await closeFocusModeDocument(activeUri, originalUri, viewColumn);
+      refreshFocusModeState(state);
+      return;
+    }
+
+    const focusUri = getFocusUri(activeUri);
+    const hasOpenedFocusDocument = vscode.workspace.textDocuments.some(
+      (doc) => doc.uri.toString() === focusUri.toString()
     );
-    return;
-  } else {
-    //set special schema
-    let virtualUri = vscode.Uri.parse("focus:" + escapedUri);
+
+    if (hasOpenedFocusDocument) {
+      await closeFocusModeDocument(focusUri, activeUri, viewColumn);
+      refreshFocusModeState(state);
+      return;
+    }
+
     //because of the special schema, openTextDocument will use the focusProvider
-    vscode.workspace
-      .openTextDocument(virtualUri)
-      .then((doc) => vscode.window.showTextDocument(doc));
+    const focusDocument = await vscode.workspace.openTextDocument(focusUri);
+    await vscode.window.showTextDocument(focusDocument, {
+      viewColumn,
+      preserveFocus: false,
+      preview: false,
+    });
+    refreshFocusModeState(state);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : `${error}`;
+    vscode.window.showErrorMessage(`Failed to toggle focus mode: ${message}`);
   }
 }
 
