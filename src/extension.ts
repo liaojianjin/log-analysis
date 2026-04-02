@@ -4,6 +4,7 @@ import {
   applyHighlight,
   deleteFilter,
   editFilter,
+  editFilterColor,
   refreshEditors,
   setHighlight,
   setVisibility,
@@ -23,11 +24,16 @@ import { FilterTreeViewProvider } from "./filterTreeViewProvider";
 import { ProjectTreeViewProvider } from "./projectTreeViewProvider";
 import { FocusProvider } from "./focusProvider";
 import { Project, Group } from "./utils";
-import { openSettings } from "./settings";
+import {
+  getProjectsConfigSnapshot,
+  isUsingUserSettingsStorage,
+  openSettings,
+} from "./settings";
 
 export type State = {
   inFocusMode: boolean;
   focusModeToggleInProgress: boolean;
+  projectsConfigSnapshot: string;
   projects: Project[];
   groups: Group[];
   decorations: vscode.TextEditorDecorationType[];
@@ -45,6 +51,7 @@ export function activate(context: vscode.ExtensionContext) {
   const state: State = {
     inFocusMode: false,
     focusModeToggleInProgress: false,
+    projectsConfigSnapshot: getProjectsConfigSnapshot(context.globalStorageUri),
     projects,
     groups,
     decorations: [],
@@ -56,6 +63,7 @@ export function activate(context: vscode.ExtensionContext) {
   };
 
   refreshSettings(state);
+  state.projectsConfigSnapshot = getProjectsConfigSnapshot(state.globalStorageUri);
 
   //tell vs code to open focus:... uris with state.focusProvider
   const disposableFocus = vscode.workspace.registerTextDocumentContentProvider(
@@ -99,6 +107,40 @@ export function activate(context: vscode.ExtensionContext) {
       state.filterTreeViewProvider.refresh();
     });
   context.subscriptions.push(disposableOnDidChangeActiveTextEditor);
+
+  let disposableOnDidChangeConfiguration =
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("log-analysis.projects")) {
+        if (!isUsingUserSettingsStorage()) {
+          return;
+        }
+        const currentSnapshot = getProjectsConfigSnapshot(state.globalStorageUri);
+        if (currentSnapshot === state.projectsConfigSnapshot) {
+          return;
+        }
+        state.projectsConfigSnapshot = currentSnapshot;
+        refreshSettings(state);
+        updateExplorerTitle(view, state);
+        return;
+      }
+
+      if (event.affectsConfiguration("log-analysis.storeInUserSettings")) {
+        state.projectsConfigSnapshot = getProjectsConfigSnapshot(state.globalStorageUri);
+        refreshSettings(state);
+        updateExplorerTitle(view, state);
+        return;
+      }
+
+      if (
+        event.affectsConfiguration("log-analysis.useDefaultFilterGroup") ||
+        event.affectsConfiguration("log-analysis.defaultFilterGroupName") ||
+        event.affectsConfiguration("log-analysis.syncFilterStatus")
+      ) {
+        refreshSettings(state);
+        updateExplorerTitle(view, state);
+      }
+    });
+  context.subscriptions.push(disposableOnDidChangeConfiguration);
 
   //register commands
   let disposableAddProject = vscode.commands.registerCommand(
@@ -213,6 +255,18 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
   context.subscriptions.push(disposibleEditFilter);
+
+  let disposibleEditFilterColor = vscode.commands.registerCommand(
+    "log-analysis.editFilterColor",
+    (treeItem: vscode.TreeItem) => {
+      if (treeItem === undefined) {
+        vscode.window.showErrorMessage('This command is excuted with button in FILTERS');
+        return;
+      }
+      editFilterColor(treeItem, state);
+    }
+  );
+  context.subscriptions.push(disposibleEditFilterColor);
 
   let disposibleDeleteFilter = vscode.commands.registerCommand(
     "log-analysis.deleteFilter",

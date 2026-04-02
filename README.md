@@ -24,7 +24,7 @@ You can click the `Add a Filter` icon at the top of the FILTERS view to add a fi
 Each line in the tab contains one filter. The filled/unfilled circle represents the color of the filter and whether the highlight is applied to documents. The text represents the regex of the filter. And the number in smaller font, if there is one, represents the number of lines that match the regex in the active editor.  
 For each filter, there are four attributes:
 
-- Color: the color is generated randomly, but if you don't like it, you can generate a new filter.
+- Color: when adding a filter, you can choose from preset colors, random color, or custom color input. You can also edit color later by clicking the color command on the filter item.
 - Regex: you can change the regex by click the pencil icon.
 - isHighlighted: If true, the lines that matches the regex will be highlighted with the filter's color. If false, this filter will be ignored for color highlighting. You can toggle this attribute by clicking the paint bucket icon.
 - isShown: Used in focus mode. If true, the lines that matches the regex will be kept; If false, the lines will be removed, unless other filters keep the line. You can toggle this attribute by clicking the eye icon.  
@@ -52,3 +52,6 @@ Use `npm run package` to generate the distributable `.vsix` package.
 
 - `log-analysis.useDefaultFilterGroup`: If enabled, adding filter directly will use/create a default group automatically.
 - `log-analysis.defaultFilterGroupName`: Name of that default group.
+- `log-analysis.storeInUserSettings`: Enable this to store filters/projects in User Settings and share across windows. Default is `false` (not saved).
+- `log-analysis.syncFilterStatus`: When sharing is enabled, controls whether each filter's state (`isHighlighted` and `isShown`) is synchronized.
+- `log-analysis.projects`: Internal shared data used when `storeInUserSettings` is enabled. Do not edit manually.

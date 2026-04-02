@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { State } from "./extension";
-import { readSettings, saveSettings } from "./settings";
+import { getProjectsConfigSnapshot, readSettings, saveSettings } from "./settings";
 import {
   Filter,
   Group,
@@ -10,6 +10,16 @@ import {
   setProjectSelectedFlag,
   setStatusBarMessage,
 } from "./utils";
+
+function persistStateForCrossWindowSync(state: State): void {
+  const selectedIndex = getProjectSelectedIndex(state.projects);
+  if (selectedIndex === -1) {
+    return;
+  }
+  state.projects[selectedIndex].groups = state.groups;
+  saveSettings(state.globalStorageUri, state.projects);
+  state.projectsConfigSnapshot = getProjectsConfigSnapshot(state.globalStorageUri);
+}
 
 export function applyHighlight(
   state: State,
@@ -85,6 +95,7 @@ export function setVisibility(
     });
   }
   refreshEditors(state);
+  persistStateForCrossWindowSync(state);
 }
 
 function getFocusUri(originalUri: vscode.Uri): vscode.Uri {
@@ -196,6 +207,7 @@ export function deleteFilter(treeItem: vscode.TreeItem, state: State) {
     }
   });
   refreshEditors(state);
+  persistStateForCrossWindowSync(state);
 }
 
 function createGroup(name: string): Group {
@@ -206,6 +218,102 @@ function createGroup(name: string): Group {
     name,
     id: `${Math.random()}`,
   };
+}
+
+type FilterColorQuickPickAction = "preset" | "custom" | "random" | "keep";
+type FilterColorQuickPickItem = vscode.QuickPickItem & {
+  action: FilterColorQuickPickAction;
+  colorValue?: string;
+};
+
+const FILTER_COLOR_PRESETS: { name: string; color: string }[] = [
+  { name: "Red", color: "#ef4444" },
+  { name: "Orange", color: "#f97316" },
+  { name: "Yellow", color: "#eab308" },
+  { name: "Green", color: "#22c55e" },
+  { name: "Teal", color: "#14b8a6" },
+  { name: "Blue", color: "#3b82f6" },
+  { name: "Purple", color: "#8b5cf6" },
+  { name: "Pink", color: "#ec4899" },
+  { name: "Gray", color: "#6b7280" },
+];
+
+const HEX_COLOR_REGEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+const RGB_COLOR_REGEX =
+  /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(?:0|0?\.\d+|1))?\s*\)$/;
+const HSL_COLOR_REGEX =
+  /^hsla?\(\s*-?\d{1,3}(?:\.\d+)?\s*(?:deg)?\s*,\s*\d{1,3}%\s*,\s*\d{1,3}%(?:\s*,\s*(?:0|0?\.\d+|1))?\s*\)$/;
+const COLOR_NAME_REGEX = /^[a-zA-Z]+$/;
+
+function isValidCustomColorInput(value: string): boolean {
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    return false;
+  }
+  return (
+    HEX_COLOR_REGEX.test(normalized) ||
+    RGB_COLOR_REGEX.test(normalized) ||
+    HSL_COLOR_REGEX.test(normalized) ||
+    COLOR_NAME_REGEX.test(normalized)
+  );
+}
+
+async function pickFilterColor(
+  randomColor: string,
+  currentColor?: string
+): Promise<string | undefined> {
+  const items: FilterColorQuickPickItem[] = [];
+  if (currentColor !== undefined) {
+    items.push({
+      label: `Keep current color (${currentColor})`,
+      action: "keep",
+      colorValue: currentColor,
+    });
+  }
+
+  FILTER_COLOR_PRESETS.forEach((preset) => {
+    items.push({
+      label: `${preset.name} (${preset.color})`,
+      description: "Preset color",
+      action: "preset",
+      colorValue: preset.color,
+    });
+  });
+  items.push({
+    label: `Random (${randomColor})`,
+    description: "Generate random color",
+    action: "random",
+    colorValue: randomColor,
+  });
+  items.push({
+    label: "Custom...",
+    description: "Input your own color value",
+    action: "custom",
+  });
+
+  const selected = await vscode.window.showQuickPick(items, {
+    placeHolder: "Select a filter color",
+    ignoreFocusOut: false,
+  });
+  if (selected === undefined) {
+    return undefined;
+  }
+  if (selected.action === "custom") {
+    const customColor = await vscode.window.showInputBox({
+      prompt: "[FILTER] Type color, e.g. #22c55e, rgb(34,197,94), hsl(142, 71%, 45%)",
+      value: currentColor ?? randomColor,
+      ignoreFocusOut: false,
+      validateInput: (value) =>
+        isValidCustomColorInput(value)
+          ? null
+          : "Invalid color format. Use hex/rgb/hsl/color-name.",
+    });
+    if (customColor === undefined) {
+      return undefined;
+    }
+    return customColor.trim();
+  }
+  return selected.colorValue;
 }
 
 function resolveTargetGroup(
@@ -234,7 +342,10 @@ function resolveTargetGroup(
   return defaultGroup;
 }
 
-export function addFilter(treeItem: vscode.TreeItem | undefined, state: State) {
+export async function addFilter(
+  treeItem: vscode.TreeItem | undefined,
+  state: State
+): Promise<void> {
   const targetGroup = resolveTargetGroup(treeItem, state);
   if (targetGroup === undefined) {
     vscode.window.showErrorMessage(
@@ -243,42 +354,83 @@ export function addFilter(treeItem: vscode.TreeItem | undefined, state: State) {
     return;
   }
 
-  // First show quick pick with choices
-  vscode.window
-    .showQuickPick(["Add a filter", "Add an exclude filter"], {
+  const selected = await vscode.window.showQuickPick(
+    ["Add a filter", "Add an exclude filter"],
+    {
       placeHolder: "Select filter type",
-    })
-    .then((selected) => {
-      if (!selected) {
+      ignoreFocusOut: false,
+    }
+  );
+  if (!selected) {
+    return;
+  }
+
+  const regexStr = await vscode.window.showInputBox({
+    prompt: "[FILTER] Type a regex for that filter",
+    ignoreFocusOut: false,
+  });
+  if (!regexStr) {
+    return;
+  }
+
+  const isExclude = selected === "Add an exclude filter";
+  const randomColor = generateRandomColor(isExclude);
+  const color = await pickFilterColor(randomColor);
+  if (color === undefined) {
+    return;
+  }
+
+  let regex: RegExp;
+  try {
+    regex = new RegExp(regexStr);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : `${error}`;
+    vscode.window.showErrorMessage(`Invalid regex: ${message}`);
+    return;
+  }
+
+  const id = `${Math.random()}`;
+  const filter: Filter = {
+    isHighlighted: true,
+    isShown: true,
+    regex,
+    color,
+    id,
+    iconPath: generateSvgUri(color, true, isExclude),
+    count: 0,
+    isExclude,
+  };
+  targetGroup.filters.push(filter);
+  refreshEditors(state);
+  persistStateForCrossWindowSync(state);
+}
+
+export async function editFilterColor(
+  treeItem: vscode.TreeItem,
+  state: State
+): Promise<void> {
+  const id = treeItem.id;
+  for (const group of state.groups) {
+    const filter = group.filters.find((f) => f.id === id);
+    if (filter !== undefined) {
+      const randomColor = generateRandomColor(filter.isExclude);
+      const color = await pickFilterColor(randomColor, filter.color);
+      if (color === undefined) {
         return;
       }
 
-      vscode.window
-        .showInputBox({
-          prompt: "[FILTER] Type a regex for that filter",
-          ignoreFocusOut: false,
-        })
-        .then((regexStr) => {
-          if (!regexStr) {
-            return;
-          }
-          const id = `${Math.random()}`;
-          const isExclude = selected === "Add an exclude filter";
-          const color = generateRandomColor(isExclude);
-          const filter: Filter = {
-            isHighlighted: true,
-            isShown: true,
-            regex: new RegExp(regexStr),
-            color: color,
-            id,
-            iconPath: generateSvgUri(color, true, isExclude),
-            count: 0,
-            isExclude: isExclude,
-          };
-          targetGroup.filters.push(filter);
-          refreshEditors(state);
-        });
-    });
+      filter.color = color;
+      filter.iconPath = generateSvgUri(
+        filter.color,
+        filter.isHighlighted,
+        filter.isExclude
+      );
+      refreshEditors(state);
+      persistStateForCrossWindowSync(state);
+      return;
+    }
+  }
+  vscode.window.showErrorMessage("Filter not found.");
 }
 
 export function editFilter(treeItem: vscode.TreeItem, state: State) {
@@ -292,13 +444,22 @@ export function editFilter(treeItem: vscode.TreeItem, state: State) {
         return;
       }
       const id = treeItem.id;
+      let regex: RegExp;
+      try {
+        regex = new RegExp(regexStr);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : `${error}`;
+        vscode.window.showErrorMessage(`Invalid regex: ${message}`);
+        return;
+      }
       state.groups.map((group) => {
         const filter = group.filters.find((filter) => filter.id === id);
         if (filter !== undefined) {
-          filter.regex = new RegExp(regexStr);
+          filter.regex = regex;
         }
       });
       refreshEditors(state);
+      persistStateForCrossWindowSync(state);
     });
 }
 
@@ -334,6 +495,7 @@ export function setHighlight(
   }
   applyHighlight(state, vscode.window.visibleTextEditors);
   refreshEditors(state);
+  persistStateForCrossWindowSync(state);
 }
 
 //refresh every visible component, including:
@@ -392,6 +554,7 @@ export function addGroup(state: State) {
       const group = createGroup(name);
       state.groups.push(group);
       refreshFilterTreeView(state);
+      persistStateForCrossWindowSync(state);
     });
 }
 
@@ -409,6 +572,7 @@ export function editGroup(treeItem: vscode.TreeItem, state: State) {
       const group = state.groups.find((group) => group.id === id);
       group!.name = name;
       refreshFilterTreeView(state);
+      persistStateForCrossWindowSync(state);
     });
 }
 
@@ -420,6 +584,7 @@ export function deleteGroup(treeItem: vscode.TreeItem, state: State) {
     state.groups.splice(deleteIndex, 1);
   }
   refreshEditors(state);
+  persistStateForCrossWindowSync(state);
 }
 
 export function saveProject(state: State) {

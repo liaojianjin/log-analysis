@@ -8,7 +8,7 @@
     "url": "https://github.com/SoySauceFor3/log-analysis.git"
   },
   "icon": "image/icon.png",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "engines": {
     "vscode": "^1.49.0"
   },
@@ -32,6 +32,24 @@
           "type": "string",
           "default": "Default",
           "description": "Name of the auto-created default filter group."
+        },
+        "log-analysis.storeInUserSettings": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "description": "Store filters/projects in User Settings for cross-window sharing. When false, data is not persisted."
+        },
+        "log-analysis.syncFilterStatus": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "When sharing is enabled, sync each filter's state (highlight and visibility/enabled state)."
+        },
+        "log-analysis.projects": {
+          "type": "array",
+          "default": [],
+          "scope": "application",
+          "description": "Internal shared filter/project data. Do not edit manually."
         }
       }
     },
@@ -85,6 +103,11 @@
         "command": "log-analysis.editFilter",
         "title": "Edit Regex for This Filter",
         "icon": "$(edit)"
+      },
+      {
+        "command": "log-analysis.editFilterColor",
+        "title": "Edit Color for This Filter",
+        "icon": "$(symbol-color)"
       },
       {
         "command": "log-analysis.addFilter",
@@ -142,6 +165,11 @@
           "command": "log-analysis.editFilter",
           "when": "view == filters && viewItem =~ /^f-/",
           "group": "inline@2"
+        },
+        {
+          "command": "log-analysis.editFilterColor",
+          "when": "view == filters && viewItem =~ /^f-/",
+          "group": "inline@3"
         },
         {
           "command": "log-analysis.editProject",
